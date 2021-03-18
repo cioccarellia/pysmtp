@@ -1,83 +1,143 @@
 import dns.resolver
-import smtplib, ssl
+import smtplib
 import socket
+import argparse
 
+import os
 from printer import *
-from config import *
-from telnetlib import Telnet
 from requests import get
-
-from progressbar import progressbar
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Arguments
+parser = argparse.ArgumentParser(description='Python SMTP wrapper')
+parser.add_argument('--lookup-domain', dest='lookup_domain', help='smtp lookup server')
+parser.add_argument('--helo-domain', dest='helo_domain', help='helo domain')
+parser.add_argument('--linefeed', type=str, default="\r\n", dest='linefeed', help='helo domain')
+parser.add_argument('--smtp-port', type=int, default=25, dest='port', help='smtp port')
+parser.add_argument('--no-ip-scan', action='store_true', dest='noip', help='omits ip checks')
 
+args = parser.parse_args()
+lookup_domain = args.lookup_domain
+helo_domain = args.helo_domain
+port = args.port
+linefeed = args.linefeed
+
+
+# Returns current machine network hostname
 def current_hostname():
     return socket.gethostname()
 
 
+# Returns current IPV4 private address
 def current_local_ip():
     return socket.gethostbyname(current_hostname())
 
 
+# Returns external ip address
 def current_public_ip():
     return get('https://api.ipify.org').text
 
 
 def fetch_dns_mx_entry():
+    """
+    Queries and returns the MX record for the matching domain.
+    """
     dprint("Querying ", lookup_domain, " MX record")
     answers = dns.resolver.query(lookup_domain, 'MX')
 
     if len(answers) == 1:
         rdata = answers[0]
-        oprint(f"Fixed MX entry to [{rdata.exchange}].")
+        cprint(f"Selected MX entry to [{rdata.exchange}].")
 
         return str(rdata.exchange)
     else:
-        wprint("Multiple MX records were found. Select one:")
+        wprint("Multiple MX records were found. Selecting the first one.")
+        return str(answers[0].exchange)
 
+
+def dig_all_records():
+    os.system(f"dig -t ANY {lookup_domain} +answer")
+
+
+print(f"Digging public records for {lookup_domain}")
+dig_all_records()
+print(f"Fetching MX DNS entries for {lookup_domain}")
+mx_record = fetch_dns_mx_entry()
 
 # Output
-print("Reading machine IP status")
+if not args.noip:
+    print("Reading machine IP status")
 
-dprint(f"Current hostname: {current_hostname()}")
-dprint(f"Current private ip: {current_local_ip()}")
-dprint(f"Current public ip: {current_public_ip()}")
-
-print("fetching MX DNX entries")
-record = fetch_dns_mx_entry()
+    dprint(f"Current hostname: {current_hostname()}")
+    dprint(f"Current private ip: {current_local_ip()}")
+    dprint(f"Current public ip: {current_public_ip()}")
 
 try:
     print("Connecting with SMTP server")
-    server = smtplib.SMTP(record, 25)
+    server = smtplib.SMTP(mx_record, port)
 
-    task_count = len(tasks)
+    cprint(f"Connected to SMTP server {lookup_domain} ({mx_record}) over port ")
 
-    if task_count == 0:
-        wprint("No tasks found. Quitting")
-        exit(0)
-    else:
-        print(f"Found {task_count} tasks to be executed.")
+    while True:
+        tokens = input(">> ").split(" ")
+        cmd = tokens[0]
 
-    for index, task in enumerate(tasks):
-        print(f"Task #{index + 1}/{task_count}")
+        try:
+            if cmd == "help":
+                print("quit, file, interactive")
+            elif cmd == "quit":
+                server.quit()
+                exit(0)
+            elif cmd == "file":
+                filename = str(tokens[1])
+                mail_from = str(tokens[2])
+                rcpt_to = str(tokens[3])
+                iterations = int(tokens[2])
 
-        if task["type"] == "single":
-            mail_from = task["mail_from"]
-            rcpt_to = task["rcpt_to"]
-            message = task["data"]
+                assert len(filename) > 0 and len(mail_from) > 0 and len(rcpt_to) > 0
 
-            dprint(f"MAIL FROM: {mail_from}")
-            dprint(f"RCPT TO: {rcpt_to}")
+                print(f"Reading file {filename} and composing SMTP message")
+                file = open(filename, "r")
+                content = file.read().split("\n")
 
-            server.sendmail(
-                mail_from, rcpt_to, message
-            )
-        elif task["type"] == "batch":
-            eprint("s")
-        else:
-            eprint(f"Task {task['type']} is not valid. Skipping")
+                message = ""
+                for line in content:
+                    if line.startswith("#"):
+                        continue
+                    message += line + linefeed
+
+                file.close()
+
+                for i in range(0, iterations):
+                    server.sendmail(mail_from, rcpt_to, message)
+
+            elif cmd == "interactive":
+                mail_from = str(tokens[1])
+                rcpt_to = str(tokens[2])
+                assert len(mail_from) > 0 and len(rcpt_to) > 0
+
+                print(f"Interactive mode enabled. Type . to compose and send.")
+
+                message = ""
+                last_line = ""
+                while True:
+                    last_line = input("")
+
+                    if last_line != ".":
+                        message += last_line + linefeed
+                        continue
+                    else:
+                        break
+
+                server.sendmail(mail_from, rcpt_to, message)
+            else:
+                wprint("Command not recognized")
+
+        except Exception:
+            eprint("Fuck you")
+
 
 except smtplib.SMTPAuthenticationError:
     eprint(

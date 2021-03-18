@@ -1,12 +1,12 @@
 from colored import fg, bg, attr
 
 
-def oprint(*messages):
+def cprint(*messages):
     message = ""
     for token in messages:
         message += str(token)
 
-    print(fg('blue') + attr('bold') + "[O] " + attr('reset') + str(message))
+    print(fg('blue') + attr('bold') + "[✓] " + attr('reset') + str(message))
 
 
 def dprint(*messages):
