@@ -1,28 +1,33 @@
+from time import sleep
+
 import dns.resolver
 import smtplib
 import socket
 import argparse
 
-import os
 from printer import *
 from requests import get
-
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os
+import editor
 
 # Arguments
-parser = argparse.ArgumentParser(description='Python SMTP wrapper')
-parser.add_argument('--lookup-domain', dest='lookup_domain', help='smtp lookup server')
-parser.add_argument('--helo-domain', dest='helo_domain', help='helo domain')
-parser.add_argument('--linefeed', type=str, default="\r\n", dest='linefeed', help='helo domain')
-parser.add_argument('--smtp-port', type=int, default=25, dest='port', help='smtp port')
+parser = argparse.ArgumentParser(description='Python SMTP utility')
+parser.add_argument('--lookup-domain', dest='lookup_domain', help='smtp lookup server', required=True)
+parser.add_argument('--greeting-domain', dest='greeting_domain', help='helo/elho domain', required=True)
+parser.add_argument('--linefeed', type=str, default="\r\n", dest='linefeed', help='SMTP encoding linefeed')
+parser.add_argument('--smtp-port', type=int, default=25, dest='port', help='SMTP port')
 parser.add_argument('--no-ip-scan', action='store_true', dest='noip', help='omits ip checks')
+group = parser.add_mutually_exclusive_group()
+group.add_argument('--uses-helo', action='store_true')
+group.add_argument('--uses-elho', action='store_false')
 
 args = parser.parse_args()
 lookup_domain = args.lookup_domain
-helo_domain = args.helo_domain
+greeting_domain = args.greeting_domain
 port = args.port
 linefeed = args.linefeed
+uses_helo = args.uses_helo
+uses_elho = args.uses_elho
 
 
 # Returns current machine network hostname
@@ -45,7 +50,7 @@ def fetch_dns_mx_entry():
     Queries and returns the MX record for the matching domain.
     """
     dprint("Querying ", lookup_domain, " MX record")
-    answers = dns.resolver.query(lookup_domain, 'MX')
+    answers = dns.resolver.Resolver().query(lookup_domain, 'MX')
 
     if len(answers) == 1:
         rdata = answers[0]
@@ -68,57 +73,79 @@ mx_record = fetch_dns_mx_entry()
 
 # Output
 if not args.noip:
-    print("Reading machine IP status")
+    print("\nReading machine IP status")
 
     dprint(f"Current hostname: {current_hostname()}")
     dprint(f"Current private ip: {current_local_ip()}")
     dprint(f"Current public ip: {current_public_ip()}")
 
 try:
-    print("Connecting with SMTP server")
-    server = smtplib.SMTP(mx_record, port)
+    print("\nConnecting with SMTP server")
+    server = smtplib.SMTP(mx_record, port, local_hostname=current_hostname())
 
-    cprint(f"Connected to SMTP server {lookup_domain} ({mx_record}) over port ")
+    cprint(f"Connected to SMTP server {lookup_domain} ({mx_record}) over port {port}")
 
     while True:
         tokens = input(">> ").split(" ")
         cmd = tokens[0]
 
+        if not cmd.strip():
+            continue
+
         try:
-            if cmd == "help":
-                print("quit, file, interactive")
-            elif cmd == "quit":
+            if cmd == "quit":
+                print("Bye")
                 server.quit()
                 exit(0)
-            elif cmd == "file":
-                filename = str(tokens[1])
-                mail_from = str(tokens[2])
-                rcpt_to = str(tokens[3])
-                iterations = int(tokens[2])
+            elif cmd == "mail":
+                if uses_elho:
+                    dprint("Helo-ing server")
+                    helo_response = server.helo(greeting_domain)
+                    cprint(helo_response)
+                else:
+                    dprint("Ehlo-ing server")
+                    elho_response = server.ehlo(greeting_domain)
+                    cprint(elho_response)
 
-                assert len(filename) > 0 and len(mail_from) > 0 and len(rcpt_to) > 0
 
-                print(f"Reading file {filename} and composing SMTP message")
-                file = open(filename, "r")
-                content = file.read().split("\n")
+                from_code = 0
+                while from_code not in range(200, 399):
+                    mail_from = input("MAIL FROM: ")
+                    from_response = server.mail(mail_from)
+                    from_code = int(from_response[0])
 
-                message = ""
-                for line in content:
-                    if line.startswith("#"):
-                        continue
-                    message += line + linefeed
+                    if from_code in range(200, 399):
+                        cprint(from_response)
+                    else:
+                        eprint(from_response)
 
-                file.close()
+                rcpt_code = 0
+                while rcpt_code not in range(200, 399):
+                    rcpt_to = input("RCPT TO: ")
+                    rcpt_response = server.rcpt(rcpt_to)
+                    rcpt_code = int(rcpt_response[0])
 
-                for i in range(0, iterations):
-                    server.sendmail(mail_from, rcpt_to, message)
+                    if rcpt_code in range(200, 399):
+                        cprint(rcpt_response)
+                    else:
+                        eprint(rcpt_response)
 
-            elif cmd == "interactive":
-                mail_from = str(tokens[1])
-                rcpt_to = str(tokens[2])
+                message = editor.edit(contents=b"").decode("utf-8")
+
+                if len(message.strip()) == 0:
+                    wprint("Message is empty")
+
+                dprint("Sending data to server")
+                data_response = server.data(message)
+                cprint(data_response)
+                cprint("Sent")
+            elif cmd == "console":
+                # PyCharm console
+                mail_from = input("MAIL FROM: ")
+                rcpt_to = input("RCPT TO: ")
                 assert len(mail_from) > 0 and len(rcpt_to) > 0
 
-                print(f"Interactive mode enabled. Type . to compose and send.")
+                print(f"Interactive mode enabled. Type . to send message.")
 
                 message = ""
                 last_line = ""
@@ -131,12 +158,13 @@ try:
                     else:
                         break
 
+                dprint("Sending")
                 server.sendmail(mail_from, rcpt_to, message)
             else:
                 wprint("Command not recognized")
 
-        except Exception:
-            eprint("Fuck you")
+        except:
+            eprint("Unknown error occourred")
 
 
 except smtplib.SMTPAuthenticationError:
