@@ -4,8 +4,10 @@ Dependencies
 pip3 install requests dnspython colored
 ```
 
-Usage
+Installation & usage
 ```bash
+git clone https://github.com/cioccarellia/pysmtp
+cd pysmtp
 python3 pysmtp.py --lookup-domain mail.polimi.it --greeting-domain polimi.it --no-ip-scan --uses-helo --no-dig
 ```
 
