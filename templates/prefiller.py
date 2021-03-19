@@ -14,21 +14,23 @@ def prefill(email_from, rcpt_to):
     return f'From: "" <{strip_mail(email_from)}>\n' \
            f'To: "" <{strip_mail(rcpt_to)}>\n' \
            'Subject:\n' \
-           'MIME-Version: 1.0\n' \
+           'Mime-Version: 1.0\n' \
            'Content-Type: multipart/alternative; boundary="00000000000014802805bddf7290"\n' \
            '\n' \
            '--00000000000014802805bddf7290\n' \
            'Content-Type: text/plain; charset="UTF-8"\n' \
            'Content-Transfer-Encoding: quoted-printable\n' \
            'Content-Disposition: inline\n' \
+           'Content-Transfer-Encoding: 7bit\n' \
            '\n' \
-           'Helo\n' \
+           'Helo plain text\n' \
            '\n' \
            '--00000000000014802805bddf7290\n' \
            'Content-Type: text/html; charset="UTF-8"\n' \
            'Content-Transfer-Encoding: quoted-printable\n' \
            'Content-Disposition: inline\n' \
+           'Content-Transfer-Encoding: 7bit\n' \
            '\n' \
-           '<h1>Helo</h1>\n' \
+           '<h1>Helo HTML</h1>\n' \
            '\n' \
            '--00000000000014802805bddf7290--'.encode()
