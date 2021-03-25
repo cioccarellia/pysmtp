@@ -14,6 +14,7 @@ import editor
 parser = argparse.ArgumentParser(description='Python SMTP utility')
 parser.add_argument('--lookup-domain', dest='lookup_domain', help='smtp lookup server', required=True)
 parser.add_argument('--greeting-domain', dest='greeting_domain', help='helo/elho domain', required=True)
+parser.add_argument('--override-hostname', dest='overridden_hostname', help='overrides SMTP domain', type=str, required=False)
 parser.add_argument('--linefeed', type=str, default="\r\n", dest='linefeed', help='SMTP encoding linefeed')
 parser.add_argument('--smtp-port', type=int, default=25, dest='port', help='SMTP port')
 parser.add_argument('--no-ip-scan', action='store_true', dest='noip', help='omits ip checks')
@@ -26,25 +27,37 @@ group.add_argument('--uses-elho', action='store_false')
 args = parser.parse_args()
 lookup_domain = str(args.lookup_domain)
 greeting_domain = str(args.greeting_domain)
+overridden_hostname = args.overridden_hostname
 port = int(args.port)
-linefeed = str(args.linefeed)
+linefeed = args.linefeed
 uses_helo = args.uses_helo
 uses_elho = args.uses_elho
 
+# Globals
+cached_public_ip = ""
+
 
 # Returns current machine network hostname
-def current_hostname():
+def resolve_hostname():
     return socket.gethostname()
+
+def smtp_hostname():
+    if len(overridden_hostname) == 0 or overridden_hostname == "None":
+        return socket.gethostname()
+    else:
+        return overridden_hostname
 
 
 # Returns current IPV4 private address
 def current_local_ip():
-    return socket.gethostbyname(current_hostname())
+    return socket.gethostbyname(resolve_hostname())
 
 
 # Returns external ip address
 def current_public_ip():
-    return get('https://api.ipify.org').text
+    global cached_public_ip
+    cached_public_ip = get('https://api.ipify.org').text
+    return cached_public_ip
 
 
 def fetch_dns_mx_entry():
@@ -79,7 +92,9 @@ mx_record = fetch_dns_mx_entry()
 if not args.noip:
     print("\nReading machine IP status")
 
-    dprint(f"Current hostname: {current_hostname()}")
+    dprint(f"Current hostname: {resolve_hostname()}")
+    if len(overridden_hostname) > 0:
+        wprint(f"Overridden SMTP username: {smtp_hostname()}")
     dprint(f"Current private ip: {current_local_ip()}")
     dprint(f"Current public ip: {current_public_ip()}")
 
@@ -87,15 +102,17 @@ if not args.noip:
 if not args.nogeo:
     print(f"\nGeo-localizing current public IP")
 
-    ip = current_public_ip()
-    dprint(f"Current public ip: {ip}")
+    if len(cached_public_ip) == 0:
+        cached_public_ip = current_public_ip()
+
+    dprint(f"Current public ip: {cached_public_ip}")
 
     headers = {
         'User-Agent': 'keycdn-tools:https://www.github.com',
     }
 
     dprint("Querying keycdn.com for ip geolocation")
-    result = requests.get(f"https://tools.keycdn.com/geo.json?host={ip}", headers=headers)
+    result = requests.get(f"https://tools.keycdn.com/geo.json?host={cached_public_ip}", headers=headers)
     response = json.loads(result.text)['data']['geo']
 
     cprint(f"host: {response['host']}")
@@ -112,8 +129,8 @@ if not args.nogeo:
     cprint(f"Date time: {response['datetime']}")
 
 try:
-    print("\nConnecting with SMTP server")
-    server = smtplib.SMTP(mx_record, port, local_hostname=current_hostname())
+    print(f"\nConnecting with SMTP server (hostname '{smtp_hostname()}')")
+    server = smtplib.SMTP(mx_record, port, local_hostname=smtp_hostname())
 
     cprint(f"Connected to SMTP server {lookup_domain} ({mx_record}) over port {port}")
     dprint("Type 'mail' to compose a message.")
@@ -147,7 +164,6 @@ try:
                     dprint("Ehlo-ing server")
                     elho_response = server.ehlo(greeting_domain)
                     cprint(elho_response)
-
                 # MAIL FROM Field
                 from_code = 0
                 mail_from = ""
