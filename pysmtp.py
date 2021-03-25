@@ -2,6 +2,8 @@ import dns.resolver
 import smtplib
 import socket
 import argparse
+import requests
+import json
 
 from printer import *
 from requests import get
@@ -16,15 +18,16 @@ parser.add_argument('--linefeed', type=str, default="\r\n", dest='linefeed', hel
 parser.add_argument('--smtp-port', type=int, default=25, dest='port', help='SMTP port')
 parser.add_argument('--no-ip-scan', action='store_true', dest='noip', help='omits ip checks')
 parser.add_argument('--no-dig', action='store_true', dest='nodig', help='omits digging all target domain records')
+parser.add_argument('--no-geo', action='store_true', dest='nogeo', help='omits digging all target domain records')
 group = parser.add_mutually_exclusive_group()
 group.add_argument('--uses-helo', action='store_true')
 group.add_argument('--uses-elho', action='store_false')
 
 args = parser.parse_args()
-lookup_domain = args.lookup_domain
-greeting_domain = args.greeting_domain
-port = args.port
-linefeed = args.linefeed
+lookup_domain = str(args.lookup_domain)
+greeting_domain = str(args.greeting_domain)
+port = int(args.port)
+linefeed = str(args.linefeed)
 uses_helo = args.uses_helo
 uses_elho = args.uses_elho
 
@@ -80,11 +83,40 @@ if not args.noip:
     dprint(f"Current private ip: {current_local_ip()}")
     dprint(f"Current public ip: {current_public_ip()}")
 
+
+if not args.nogeo:
+    print(f"\nGeo-localizing current public IP")
+
+    ip = current_public_ip()
+    dprint(f"Current public ip: {ip}")
+
+    headers = {
+        'User-Agent': 'keycdn-tools:https://www.github.com',
+    }
+
+    dprint("Querying keycdn.com for ip geolocation")
+    result = requests.get(f"https://tools.keycdn.com/geo.json?host={ip}", headers=headers)
+    response = json.loads(result.text)['data']['geo']
+
+    cprint(f"host: {response['host']}")
+    cprint(f"ip address: {response['ip']}")
+    cprint(f"rdns: {response['rdns']}")
+    cprint(f"asn: {response['asn']}")
+    cprint(f"isp: {response['isp']}")
+    cprint(f"Continent: {response['continent_name']}, {response['continent_code']}")
+    cprint(f"Country: {response['country_name']}, {response['country_code']}")
+    wprint(f"Region: {response['region_name']}, {response['region_code']}")
+    wprint(f"City: {response['city']}, ZIP {response['postal_code']}")
+    cprint(f"Lat: {response['latitude']}, Lon: {response['longitude']}")
+    cprint(f"Timezone: {response['timezone']}")
+    cprint(f"Date time: {response['datetime']}")
+
 try:
     print("\nConnecting with SMTP server")
     server = smtplib.SMTP(mx_record, port, local_hostname=current_hostname())
 
     cprint(f"Connected to SMTP server {lookup_domain} ({mx_record}) over port {port}")
+    dprint("Type 'mail' to compose a message.")
 
     while True:
         tokens = input(">> ").split(" ")
@@ -111,7 +143,6 @@ try:
                 if uses_elho:
                     dprint("Helo-ing server")
                     helo_response = server.helo(greeting_domain)
-                    cprint(helo_response)
                 else:
                     dprint("Ehlo-ing server")
                     elho_response = server.ehlo(greeting_domain)
@@ -154,10 +185,15 @@ try:
                     if rcpt_code in range(200, 399):
                         cprint(rcpt_response)
                     else:
+                        eprint(rcpt_code, rcpt_text)
+
                         if "banned sending ip" in rcpt_text.lower() and "https://sender.office.com" in rcpt_text:
                             wprint(f"Current IP address has been detected as spam by Microsoft servers and manually needs to be delisted. Visit [https://sender.office.com]")
+                            exit(1)
 
-                        eprint(rcpt_code, rcpt_text)
+                        if "blocked" in rcpt_text.lower() and "Spamhaus" in rcpt_text:
+                            wprint(f"Current IP address has been detected as spam by Spamhaus servers and manually needs to be delisted.")
+                            exit(1)
 
                 # Data Field
                 from templates import prefiller
