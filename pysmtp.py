@@ -24,6 +24,7 @@ group = parser.add_mutually_exclusive_group()
 group.add_argument('--uses-helo', action='store_true')
 group.add_argument('--uses-elho', action='store_false')
 
+# Parsing
 args = parser.parse_args()
 lookup_domain = str(args.lookup_domain)
 greeting_domain = str(args.greeting_domain)
@@ -41,6 +42,8 @@ cached_public_ip = ""
 def resolve_hostname():
     return socket.gethostname()
 
+
+# Returns the current/overridden hostname
 def smtp_hostname():
     if len(overridden_hostname) == 0 or overridden_hostname == "None":
         return socket.gethostname()
@@ -60,6 +63,7 @@ def current_public_ip():
     return cached_public_ip
 
 
+# Selects the MX server for SMTP communication
 def fetch_dns_mx_entry():
     """
     Queries and returns the MX record for the matching domain.
@@ -77,18 +81,23 @@ def fetch_dns_mx_entry():
         return str(answers[0].exchange)
 
 
+# Digs public records for the looked up domain
 def dig_all_records():
     os.system(f"dig -t ANY {lookup_domain} +answer")
 
 
+### Digging
 if not args.nodig:
     print(f"Digging public records for {lookup_domain}")
     dig_all_records()
 
+
+# MX Entries
 print(f"Fetching MX DNS entries for {lookup_domain}")
 mx_record = fetch_dns_mx_entry()
 
-# Output
+
+# Ip Address
 if not args.noip:
     print("\nReading machine IP status")
 
@@ -99,6 +108,7 @@ if not args.noip:
     dprint(f"Current public ip: {current_public_ip()}")
 
 
+# Geolocation
 if not args.nogeo:
     print(f"\nGeo-localizing current public IP")
 
@@ -128,6 +138,7 @@ if not args.nogeo:
     cprint(f"Timezone: {response['timezone']}")
     cprint(f"Date time: {response['datetime']}")
 
+# SMTP Connection
 try:
     print(f"\nConnecting with SMTP server (hostname '{smtp_hostname()}')")
     server = smtplib.SMTP(mx_record, port, local_hostname=smtp_hostname())
